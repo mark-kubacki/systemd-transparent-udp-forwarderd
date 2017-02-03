@@ -1,0 +1,12 @@
+# shell scripts should not use tabs to indent!
+*.bash    text eol=lf core.whitespace whitespace=tab-in-indent,trailing-space,tabwidth=2
+*.sh      text eol=lf core.whitespace whitespace=tab-in-indent,trailing-space,tabwidth=2
+
+# files for systemd (shell-similar)
+*.service text eol=lf core.whitespace whitespace=tab-in-indent,trailing-space,tabwidth=2
+*.socket  text eol=lf core.whitespace whitespace=tab-in-indent,trailing-space,tabwidth=2
+
+# C/C++
+*.c       text eol=lf core.whitespace whitespace=space-before-tab,indent-with-non-tab,trailing-space,tabwidth=8
+
+.git*     text eol=auto core.whitespace whitespace=trailing-space

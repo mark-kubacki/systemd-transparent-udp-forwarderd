@@ -1,0 +1,3 @@
+[submodule "vendor/libmill"]
+	path = vendor/libmill
+	url = https://github.com/sustrik/libmill.git
