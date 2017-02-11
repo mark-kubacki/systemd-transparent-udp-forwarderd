@@ -1,0 +1,12 @@
+binary:
+  stage: build
+  before_script:
+    - gcc -v
+    - apt-get -q update && apt-get -y --no-install-recommends --allow-downgrades install libsystemd-dev
+    - dpkg --list | grep -F systemd
+  script:
+    - ./build.sh
+  artifacts:
+    expire_in: 6 months
+    paths:
+      - systemd-*udp*d
