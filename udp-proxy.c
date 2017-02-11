@@ -201,7 +201,7 @@ int main(int argc, char *argv[]) {
 	for (int i = 0; i < n_systemd_sockets; i++) {
 		auto fd = (SD_LISTEN_FDS_START + i);
 
-/*		int r = sd_is_socket(fd, 0, SOCK_DGRAM, 1);
+		int r = sd_is_socket(fd, AF_UNSPEC, SOCK_DGRAM, -1);
 		if (r < 0) {
 			sd_journal_print(LOG_ERR, "Failed to determine socket type.");
 			exit_code = 4;
@@ -210,7 +210,7 @@ int main(int argc, char *argv[]) {
 			sd_journal_print(LOG_ERR, "Passed in socket is not a datagram socket.");
 			exit_code = 5;
 			goto finish;
-		} */
+		}
 
 		// set to non-blocking
 		if (set_nonblocking(fd) < 0) {
