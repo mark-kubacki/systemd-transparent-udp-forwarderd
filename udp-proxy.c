@@ -11,6 +11,7 @@
 #include <syslog.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <time.h>
 
 #include <systemd/sd-daemon.h>
 #include <systemd/sd-journal.h>
@@ -21,6 +22,9 @@ typedef union {
 	struct sockaddr_in in;
 	struct sockaddr_in6 in6;
 } sockaddr_union;
+
+// These counters are reset in display_stats().
+static size_t received_counter = 0, sent_counter = 0;
 
 static int udp_forward(struct msghdr *msg, struct sockaddr *dstaddr) {
 	auto out = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
@@ -50,6 +54,7 @@ static int udp_forward(struct msghdr *msg, struct sockaddr *dstaddr) {
 		close(out);
 		return -5;
 	}
+	++sent_counter; // Not thread-safe, but this is a single-threaded program.
 
 	close(out);
 	return 0;
@@ -60,6 +65,7 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	if (ioctl(fd, FIONREAD, &num_octets) < 0) { // usually far less than 64k, more like 1.4k
 		return -errno;
 	}
+	++received_counter; // Not thread-safe, but this is a single-threaded program.
 	void *buffer = alloca(num_octets + 512); // Add some offset to account for overhead.
 
 	struct msghdr msg;
@@ -158,6 +164,26 @@ static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, c
 	return 0;
 }
 
+static const uint64_t stats_every_usec = 10 * 1000000;
+
+static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
+	if (sent_counter == received_counter) { // okay because this is a single-threaded program.
+		(void) sd_notifyf(false, "STATUS=%zu datagrams forwarded in the last %d seconds.",
+			sent_counter, (unsigned int)(stats_every_usec / 1000000));
+	} else if (sent_counter < received_counter) {
+		(void) sd_notifyf(false, "STATUS=%zu datagrams forwarded in the last %d seconds, %zu not.",
+			sent_counter, (unsigned int)(stats_every_usec / 1000000), received_counter - sent_counter);
+	} else {
+		(void) sd_notifyf(false, "STATUS=%zu datagrams forwarded in the last %d seconds, excess %zu.",
+			sent_counter, (unsigned int)(stats_every_usec / 1000000), sent_counter - received_counter);
+	}
+
+	sent_counter = received_counter = 0;
+
+	sd_event_source_set_time(es, now + stats_every_usec); // reschedules
+	return 0;
+}
+
 int main(int argc, char *argv[]) {
 	int n_systemd_sockets = sd_listen_fds(0);
 	if ((n_systemd_sockets + 1) != argc) {
@@ -167,6 +193,7 @@ int main(int argc, char *argv[]) {
 
 	int exit_code = 0;
 	sd_event_source *event_source = NULL;
+	sd_event_source *timer_source = NULL;
 	sd_event *event = NULL;
 
 	if (sd_event_default(&event) < 0) {
@@ -242,10 +269,20 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	/* Display some stats every now and then. */
+	{
+		uint64_t now;
+		sd_event_now(event, CLOCK_MONOTONIC, &now);
+		sd_event_add_time(event, &timer_source,
+			CLOCK_MONOTONIC, now + stats_every_usec, 0,
+			display_stats, NULL);
+	}
+	sd_event_source_set_enabled(timer_source, SD_EVENT_ON);
+
 	/* Block on main event-loop call. */
 	sd_journal_print(LOG_INFO, "Written by W. Mark Kubacki <wmark@hurrikane.de> https://github.com/wmark");
 	sd_journal_print(LOG_INFO, "Done setting everything up. Serving.");
-	(void) sd_notifyf(false, "READY=1\n" "STATUS=Serving incoming datagrams.");
+	(void) sd_notify(false, "READY=1\n" "STATUS=Up and running.");
 	int r = sd_event_loop(event);
 	if (r < 0) {
 		sd_journal_print(LOG_ERR, "Failure: %s\n", strerror(-r));
@@ -253,6 +290,11 @@ int main(int argc, char *argv[]) {
 	}
 
 finish:
+	if (timer_source != NULL) {
+		sd_event_source_set_enabled(timer_source, SD_EVENT_OFF);
+		timer_source = sd_event_source_unref(timer_source);
+	}
+
 	sd_journal_print(LOG_DEBUG, "Freeing reverences to event-source and the event-loop.");
 	event_source = sd_event_source_unref(event_source);
 	event = sd_event_unref(event);
