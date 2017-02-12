@@ -5,7 +5,9 @@ binary:
     - apt-get -q update && apt-get -y --no-install-recommends --allow-downgrades install libsystemd-dev
     - dpkg --list | grep -F systemd
   script:
-    - ./build.sh
+    - mkdir build && cd build
+    - cmake -GNinja .. && ninja
+    - mv systemd-*udp*d ..
   artifacts:
     expire_in: 6 months
     paths:

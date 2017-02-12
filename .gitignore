@@ -1,1 +1,3 @@
-systemd-udp-forwarderd
+build/
+release/
+*.o
