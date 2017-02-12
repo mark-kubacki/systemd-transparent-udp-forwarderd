@@ -17,6 +17,11 @@
 #include <systemd/sd-journal.h>
 #include <systemd/sd-event.h>
 
+#if !defined(likely)
+#define likely(x)       __builtin_expect(!!(x), 1)
+#define unlikely(x)     __builtin_expect(!!(x), 0)
+#endif
+
 typedef union {
 	struct sockaddr sa;
 	struct sockaddr_in in;
@@ -31,13 +36,13 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 	auto out_family = dstaddr->sa.sa_family;
 
 	auto out = socket(out_family, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
-	if (out < 0) {
+	if (unlikely(out < 0)) {
 		sd_journal_print(LOG_ERR, "Error creating outbound socket. (#%d %s)\n", errno, strerror(errno));
 		return -2;
 	}
 
 	int n = 1;
-	if (setsockopt(out, SOL_IP, IP_TRANSPARENT, &n, sizeof(int)) != 0) {
+	if (unlikely(setsockopt(out, SOL_IP, IP_TRANSPARENT, &n, sizeof(int)) != 0)) {
 		sd_journal_print(LOG_ERR, "Error setting transparency towards destination. (#%d %s)\n", errno, strerror(errno));
 		close(out);
 		return -3;
@@ -54,7 +59,7 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 	}
 
 	// spoof the sender
-	if (bind(out, (struct sockaddr *)msg->msg_name, (in_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0) {
+	if (unlikely(bind(out, (struct sockaddr *)msg->msg_name, (in_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)) {
 		sd_journal_print(LOG_ERR, "Error binding to destination. (#%d %s)\n", errno, strerror(errno));
 		close(out);
 		return -4;
@@ -62,7 +67,7 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 
 	ssize_t ret = sendto(out, msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len, 0,
 		(struct sockaddr *)dstaddr, (out_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6));
-	if (ret <= 0) {
+	if (unlikely(ret <= 0)) {
 		sd_journal_print(LOG_ERR, "Error sending to destination. (#%d %s)\n", errno, strerror(errno));
 		close(out);
 		return -5;
@@ -75,7 +80,7 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 
 static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
 	ssize_t num_octets = 0;
-	if (ioctl(fd, FIONREAD, &num_octets) < 0) { // usually far less than 64k, more like 1.4k
+	if (unlikely(ioctl(fd, FIONREAD, &num_octets) < 0)) { // usually far less than 64k, more like 1.4k
 		return -errno;
 	}
 	++received_counter; // Not thread-safe, but this is a single-threaded program.
@@ -101,8 +106,8 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 
 	/* receive */
 	num_octets = recvmsg(fd, &msg, 0);
-	if (num_octets < 0) {
-		if (errno == EAGAIN) {
+	if (unlikely(num_octets < 0)) {
+		if (likely(errno == EAGAIN)) {
 			return 0;
 		}
 		sd_journal_print(LOG_ERR, "Error calling recvmsg(). err (#%d %s)\n", errno, strerror(errno));
@@ -183,7 +188,7 @@ static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, c
 static const uint64_t stats_every_usec = 10 * 1000000;
 
 static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
-	if (sent_counter == received_counter) { // okay because this is a single-threaded program.
+	if (likely(sent_counter == received_counter)) { // okay because this is a single-threaded program.
 		(void) sd_notifyf(false, "STATUS=%zu datagrams forwarded in the last %d seconds.",
 			sent_counter, (unsigned int)(stats_every_usec / 1000000));
 	} else if (sent_counter < received_counter) {
@@ -212,7 +217,7 @@ int main(int argc, char *argv[]) {
 	sd_event_source *timer_source = NULL;
 	sd_event *event = NULL;
 
-	if (sd_event_default(&event) < 0) {
+	if (unlikely(sd_event_default(&event) < 0)) {
 		sd_journal_print(LOG_DEBUG, "Cannot instantiate the event loop.");
 		exit_code = 72;
 		goto finish;
@@ -220,15 +225,15 @@ int main(int argc, char *argv[]) {
 
 	/* Register events without a callback, to trigger exit from the main event-loop call. */
 	sigset_t ss;
-	if (sigemptyset(&ss) < 0 || sigaddset(&ss, SIGTERM) < 0 || sigaddset(&ss, SIGINT) < 0) {
+	if (unlikely(sigemptyset(&ss) < 0 || sigaddset(&ss, SIGTERM) < 0 || sigaddset(&ss, SIGINT) < 0)) {
 		exit_code = errno;
 		goto finish;
 	}
-	if (sigprocmask(SIG_BLOCK, &ss, NULL) < 0) {
+	if (unlikely(sigprocmask(SIG_BLOCK, &ss, NULL) < 0)) {
 		exit_code = errno;
 		goto finish;
 	}
-	if (sd_event_add_signal(event, NULL, SIGTERM, NULL, NULL) < 0 || sd_event_add_signal(event, NULL, SIGINT, NULL, NULL) < 0) {
+	if (unlikely(sd_event_add_signal(event, NULL, SIGTERM, NULL, NULL) < 0 || sd_event_add_signal(event, NULL, SIGINT, NULL, NULL) < 0)) {
 		exit_code = 73;
 		goto finish;
 	}
