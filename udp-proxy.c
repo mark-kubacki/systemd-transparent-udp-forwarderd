@@ -26,8 +26,11 @@ typedef union {
 // These counters are reset in display_stats().
 static size_t received_counter = 0, sent_counter = 0;
 
-static int udp_forward(struct msghdr *msg, struct sockaddr *dstaddr) {
-	auto out = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
+static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
+	auto in_family = ((struct sockaddr *)msg->msg_name)->sa_family;
+	auto out_family = dstaddr->sa.sa_family;
+
+	auto out = socket(out_family, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
 	if (out < 0) {
 		sd_journal_print(LOG_ERR, "Error creating outbound socket. (#%d %s)\n", errno, strerror(errno));
 		return -2;
@@ -40,15 +43,25 @@ static int udp_forward(struct msghdr *msg, struct sockaddr *dstaddr) {
 		return -3;
 	}
 
+	// IPv4 in IPv6 specialties
+	if (out_family == AF_INET6 && out_family != in_family) {
+		int m = 0;
+		if (setsockopt(out, IPPROTO_IPV6, IPV6_V6ONLY, &m, sizeof(int)) != 0) {
+			sd_journal_print(LOG_ERR, "Error setting ipv6-only = no towards destination. (#%d %s)\n", errno, strerror(errno));
+			close(out);
+			return -6;
+		}
+	}
+
 	// spoof the sender
-	if (bind(out, (struct sockaddr *)msg->msg_name, sizeof(struct sockaddr)) < 0) {
+	if (bind(out, (struct sockaddr *)msg->msg_name, (in_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0) {
 		sd_journal_print(LOG_ERR, "Error binding to destination. (#%d %s)\n", errno, strerror(errno));
 		close(out);
 		return -4;
 	}
 
 	ssize_t ret = sendto(out, msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len, 0,
-		dstaddr, sizeof(*dstaddr));
+		(struct sockaddr *)dstaddr, (out_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6));
 	if (ret <= 0) {
 		sd_journal_print(LOG_ERR, "Error sending to destination. (#%d %s)\n", errno, strerror(errno));
 		close(out);
@@ -72,8 +85,11 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	struct iovec iov[1];
 	sockaddr_union sa;
 	char cntrlbuf[64];
+
+	memset(&msg, 0, sizeof(msg));
 	memset(&sa, 0, sizeof(sa));
 	memset(cntrlbuf, 0, sizeof(cntrlbuf));
+
 	iov[0].iov_base = buffer;
 	iov[0].iov_len = num_octets;
 	msg.msg_iov = iov;
@@ -95,7 +111,7 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	msg.msg_iov[0].iov_len = num_octets;
 
 	/* forward */
-	struct sockaddr *dstaddr = userdata;
+	sockaddr_union *dstaddr = userdata;
 	udp_forward(&msg, dstaddr);
 
 	return 0;
