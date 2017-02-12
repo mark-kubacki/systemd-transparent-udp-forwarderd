@@ -31,6 +31,15 @@ typedef union {
 // These counters are reset in display_stats().
 static size_t received_counter = 0, sent_counter = 0;
 
+/* udp_forward sends the datagram from |*msg| to address |*dstaddr|.
+ * Its source will be the original source found in |msg|.
+ *
+ * Address families of source and destination must match.
+ *
+ * This is called by |udp_receive|.
+ *
+ * Negative return values indicate an error. A corresponding error message
+ * will be passed to systemd's journal. */
 static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 	auto in_family = ((struct sockaddr *)msg->msg_name)->sa_family;
 	auto out_family = dstaddr->sa.sa_family;
@@ -78,6 +87,16 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 	return 0;
 }
 
+/* udp_receive is called by the event loop and reads incoming datagrams from the supplied |fd|.
+ * On success it will be handed over to |udp_forward| for forwarding.
+ *
+ * |*userdata| is expected to be a destination address.
+ * A buffer to hold the payload of the incoming packet will be allocated by this callback.
+ *
+ * The event loop is responsible to call this.
+ *
+ * Negative return values indicate an fatal error. A corresponding error message will be sent to
+ * systemd's journal. */
 static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
 	ssize_t num_octets = 0;
 	if (unlikely(ioctl(fd, FIONREAD, &num_octets) < 0)) { // usually far less than 64k, more like 1.4k
@@ -122,6 +141,10 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	return 0;
 }
 
+/* set_nonblocking sets a socket provided by |fd| to "non-blocking mode".
+ * Calling this is only necessary once, at setup.
+ *
+ * Return values are from |fcntl|. */
 static int set_nonblocking(int fd) {
 	int opt = fcntl(fd, F_GETFL, 0);
 	if (opt == -1) {
@@ -134,6 +157,14 @@ static int set_nonblocking(int fd) {
 	return rc;
 }
 
+/* hostnametoaddr translates a string |*hostname| to an address |*dstaddr|, preferably in
+ * address family |preferred_sa_family| (IPv4, IPv6…).
+ *
+ * The provided |*dstaddr| must be empty, and already allocated.
+ *
+ * This really is an utility function for |fill_dstaddr|, which calls it.
+ *
+ * Negative return values indicate an error. */
 static int hostnametoaddr(sockaddr_union *dstaddr, const char *hostname, int preferred_sa_family) {
 	struct hostent *hostinfo = gethostbyname2(hostname, preferred_sa_family);
 	if (hostinfo == NULL) {
@@ -155,6 +186,17 @@ static int hostnametoaddr(sockaddr_union *dstaddr, const char *hostname, int pre
 	return 0;
 }
 
+/* fill_dstaddr is responsible for translating a user-provided destinations |*arg_remote_host|,
+ * which can be an address or hostname, to an address |*dstaddr| we can forward datagrams to.
+ * In case the user has forgotten to provide a destination port along with an address,
+ * the destination port will be copied from |srcaddr| to |*dstaddr|.
+ *
+ * |*dstaddr| must be empty, and already allocated.
+ *
+ * This is used in |main| to initialize any and all |*dstaddr| in one place
+ * to avoid costly address lookups.
+ *
+ * Negative return values indicate errors. */
 static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, const char *arg_remote_host) {
 	const char *node, *service;
 
@@ -185,8 +227,15 @@ static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, c
 	return 0;
 }
 
+// How often should we update PID 1 about our workload?
 static const uint64_t stats_every_usec = 10 * 1000000;
 
+/* display_stats is a timer which updates PID 1 about the status of this process.
+ * |sent_counter| and |received_counter| are read for that, and cleared afterwards.
+ *
+ * MT: This is not thread-safe, but this program is single-threaded.
+ *
+ * display_stats is expected to be called by the event loop. */
 static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
 	if (likely(sent_counter == received_counter)) { // okay because this is a single-threaded program.
 		(void) sd_notifyf(false, "STATUS=%zu datagrams forwarded in the last %d seconds.",
@@ -205,6 +254,13 @@ static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
 	return 0;
 }
 
+/* main accepts any and all sockets handed over by PID 1, matches them with destinations from
+ * |*argv[]|, and setups the event loop and its callbacks.
+ *
+ * The provided sockets will be closed on exit, which enables PID 1 to open new ones right away.
+ *
+ * Return values ≠0 indicate an error, and a corresponding error message will either be displayed
+ * on STDERR, or sent to systemd's journal. */
 int main(int argc, char *argv[]) {
 	int n_systemd_sockets = sd_listen_fds(0);
 	if ((n_systemd_sockets + 1) != argc) {
