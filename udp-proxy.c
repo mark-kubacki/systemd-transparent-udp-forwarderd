@@ -93,6 +93,10 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
    Please keep in mind that IPv6 allows you to stitch together packets to send a single big UDP payload (about 4G!). */
 static const ssize_t max_accepted_payload_octets = 16 * 1024;
 
+/* Used and to be cleared in udp_receive(), at least the size of max_accepted_payload_octets.
+   Allocated in main(). */
+static void *payload_buffer;
+
 /* udp_receive is called by the event loop and reads incoming datagrams from the supplied |fd|.
  * On success it will be handed over to |udp_forward| for forwarding.
  *
@@ -115,7 +119,6 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 		// We still need to call recvmsg, but with an empty buffer to get the message discarded.
 		num_octets = 0;
 	}
-	void *buffer = alloca(num_octets + 512); // Add some offset to account for overhead.
 
 	struct msghdr msg;
 	struct iovec iov[1];
@@ -126,8 +129,8 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	memset(&sa, 0, sizeof(sa));
 	memset(cntrlbuf, 0, sizeof(cntrlbuf));
 
-	iov[0].iov_base = buffer;
-	iov[0].iov_len = num_octets;
+	iov[0].iov_base = payload_buffer; // MT
+	iov[0].iov_len = max_accepted_payload_octets; // payload_buffer is at least that size
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 1;
 	msg.msg_name = &sa.sa;
@@ -150,7 +153,7 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	if (unlikely(msg.msg_flags & (MSG_CTRUNC|MSG_TRUNC))) {
 		sd_journal_print(LOG_WARNING, "Will forward a truncated datagram. Increase the recv buffers a bit to avoid this?\n");
 	}
-	msg.msg_iov[0].iov_len = num_octets;
+	msg.msg_iov[0].iov_len = num_octets; // don't send the whole buffer – just the octets we've received
 
 	/* forward */
 	sockaddr_union *dstaddr = userdata;
@@ -364,6 +367,17 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	/* Allocate the payload buffer. */
+	{
+		size_t buffer_size = ((size_t)(max_accepted_payload_octets - 1)/4096 + 1) * 4096; // multiple of 4k, the assumed page size
+		payload_buffer = malloc(buffer_size);
+		if (unlikely(payload_buffer == NULL)) {
+			exit_code = 71; // save to assume it's a sys error if we don't have a few kb for malloc
+			goto finish;
+		}
+		memset(payload_buffer, 0, buffer_size);
+	}
+
 	/* Display some stats every now and then. */
 	{
 		uint64_t now;
@@ -398,6 +412,10 @@ finish:
 	for (int i = 0; i < argc; ++i) {
 		// fdclean(SD_LISTEN_FDS_START + i); -- No needed here.
 		close(SD_LISTEN_FDS_START + i);
+	}
+
+	if (payload_buffer != NULL) {
+		free(payload_buffer); // makes static code analyzing tools happy
 	}
 
 	return exit_code;
