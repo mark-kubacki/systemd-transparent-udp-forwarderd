@@ -147,6 +147,9 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 		sd_journal_print(LOG_ERR, "Error calling recvmsg(). err (#%d %s)\n", errno, strerror(errno));
 		return -errno;
 	}
+	if (unlikely(msg.msg_flags & (MSG_CTRUNC|MSG_TRUNC))) {
+		sd_journal_print(LOG_WARNING, "Will forward a truncated datagram. Increase the recv buffers a bit to avoid this?\n");
+	}
 	msg.msg_iov[0].iov_len = num_octets;
 
 	/* forward */
