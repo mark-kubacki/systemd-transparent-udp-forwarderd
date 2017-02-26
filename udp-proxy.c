@@ -110,14 +110,14 @@ static void *payload_buffer;
 static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
 	++received_counter; // Not thread-safe, but this is a single-threaded program.
 
-	ssize_t num_octets = 0;
-	if (unlikely(ioctl(fd, FIONREAD, &num_octets) < 0)) { // usually far less than 64k, more like 1.4k
+	ssize_t expected_octets = 0;
+	if (unlikely(ioctl(fd, FIONREAD, &expected_octets) < 0)) { // usually far less than 64k, more like 1.4k
 		return -errno;
 	}
-	if (unlikely(num_octets > max_accepted_payload_octets)) {
-		sd_journal_print(LOG_WARNING, "Dropped: Payload size exceeds maximum: %zd\n", num_octets);
+	if (unlikely(expected_octets > max_accepted_payload_octets)) {
+		sd_journal_print(LOG_WARNING, "Dropped: Payload size exceeds maximum: %zd\n", expected_octets);
 		// We still need to call recvmsg, but with an empty buffer to get the message discarded.
-		num_octets = 0;
+		expected_octets = 0;
 	}
 
 	struct msghdr msg;
@@ -130,7 +130,11 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	memset(cntrlbuf, 0, sizeof(cntrlbuf));
 
 	iov[0].iov_base = payload_buffer; // MT
-	iov[0].iov_len = max_accepted_payload_octets; // payload_buffer is at least that size
+	if (unlikely(expected_octets == 0)) {
+		iov[0].iov_len = 0;
+	} else {
+		iov[0].iov_len = max_accepted_payload_octets; // payload_buffer is at least that size
+	}
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 1;
 	msg.msg_name = &sa.sa;
@@ -139,21 +143,21 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	msg.msg_controllen = sizeof(cntrlbuf);
 
 	/* receive */
-	num_octets = recvmsg(fd, &msg, 0);
-	if (unlikely(num_octets == 0)) { // no payload, or we want to drop it anyway
+	ssize_t read_octets = recvmsg(fd, &msg, 0);
+	if (unlikely(read_octets == 0)) { // no payload, or we want to drop it anyway
 		return 0;
 	}
-	if (unlikely(num_octets < 0)) {
+	if (unlikely(read_octets < 0)) {
 		if (likely(errno == EAGAIN)) {
 			return 0;
 		}
-		sd_journal_print(LOG_ERR, "Error calling recvmsg(). err (#%d %s)\n", errno, strerror(errno));
-		return -errno;
+		sd_journal_print(LOG_WARNING, "Error calling recvmsg(). err (#%d %s)\n", errno, strerror(errno));
+		return 0; // 0 because this function can be called again for new packets
 	}
 	if (unlikely(msg.msg_flags & (MSG_CTRUNC|MSG_TRUNC))) {
 		sd_journal_print(LOG_WARNING, "Will forward a truncated datagram. Increase the recv buffers a bit to avoid this?\n");
 	}
-	msg.msg_iov[0].iov_len = num_octets; // don't send the whole buffer – just the octets we've received
+	msg.msg_iov[0].iov_len = read_octets; // don't send the whole buffer
 
 	/* forward */
 	sockaddr_union *dstaddr = userdata;
