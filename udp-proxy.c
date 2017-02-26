@@ -87,6 +87,12 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 	return 0;
 }
 
+/* udp_receive() will refuse payloads greater than this.
+   16k is greater than most common jumbo frames can accomdate (4098 to 9204 octets),
+   but smaller than multi-fragment datagrams (aout 65k) which are extremely uncommon in practice.
+   Please keep in mind that IPv6 allows you to stitch together packets to send a single big UDP payload (about 4G!). */
+static const ssize_t max_accepted_payload_octets = 16 * 1024;
+
 /* udp_receive is called by the event loop and reads incoming datagrams from the supplied |fd|.
  * On success it will be handed over to |udp_forward| for forwarding.
  *
@@ -98,11 +104,17 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
  * Negative return values indicate an fatal error. A corresponding error message will be sent to
  * systemd's journal. */
 static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
+	++received_counter; // Not thread-safe, but this is a single-threaded program.
+
 	ssize_t num_octets = 0;
 	if (unlikely(ioctl(fd, FIONREAD, &num_octets) < 0)) { // usually far less than 64k, more like 1.4k
 		return -errno;
 	}
-	++received_counter; // Not thread-safe, but this is a single-threaded program.
+	if (unlikely(num_octets > max_accepted_payload_octets)) {
+		sd_journal_print(LOG_WARNING, "Dropped: Payload size exceeds maximum: %zd\n", num_octets);
+		// We still need to call recvmsg, but with an empty buffer to get the message discarded.
+		num_octets = 0;
+	}
 	void *buffer = alloca(num_octets + 512); // Add some offset to account for overhead.
 
 	struct msghdr msg;
@@ -125,6 +137,9 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 
 	/* receive */
 	num_octets = recvmsg(fd, &msg, 0);
+	if (unlikely(num_octets == 0)) { // no payload, or we want to drop it anyway
+		return 0;
+	}
 	if (unlikely(num_octets < 0)) {
 		if (likely(errno == EAGAIN)) {
 			return 0;
