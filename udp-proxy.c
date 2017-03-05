@@ -72,14 +72,14 @@ static int udp_forward(const struct msghdr *msg, const sockaddr_union *dstaddr) 
 
 	auto out = socket(out_family, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
 	if (unlikely(out < 0)) {
-		sd_journal_print(LOG_ERR, "Error creating outbound socket. (#%d %s)\n", errno, strerror(errno));
+		(void) sd_journal_print(LOG_ERR, "Error creating outbound socket. (#%d %s)\n", errno, strerror(errno));
 		return -2;
 	}
 
 	int n = 1;
 	if (unlikely(setsockopt(out, SOL_IP, IP_TRANSPARENT, &n, sizeof(int)) != 0)) {
-		sd_journal_print(LOG_ERR, "Error setting transparency towards destination. (#%d %s)\n", errno, strerror(errno));
-		close(out);
+		(void) sd_journal_print(LOG_ERR, "Error setting transparency towards destination. (#%d %s)\n", errno, strerror(errno));
+		(void) close(out);
 		return -3;
 	}
 
@@ -87,29 +87,29 @@ static int udp_forward(const struct msghdr *msg, const sockaddr_union *dstaddr) 
 	if (out_family == AF_INET6 && out_family != in_family) {
 		int m = 0;
 		if (setsockopt(out, IPPROTO_IPV6, IPV6_V6ONLY, &m, sizeof(int)) != 0) {
-			sd_journal_print(LOG_ERR, "Error setting ipv6-only = no towards destination. (#%d %s)\n", errno, strerror(errno));
-			close(out);
+			(void) sd_journal_print(LOG_ERR, "Error setting ipv6-only = no towards destination. (#%d %s)\n", errno, strerror(errno));
+			(void) close(out);
 			return -6;
 		}
 	}
 
 	/* spoof the sender */
 	if (unlikely(bind(out, (struct sockaddr *)msg->msg_name, (in_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)) {
-		sd_journal_print(LOG_ERR, "Error binding to destination. (#%d %s)\n", errno, strerror(errno));
-		close(out);
+		(void) sd_journal_print(LOG_ERR, "Error binding to destination. (#%d %s)\n", errno, strerror(errno));
+		(void) close(out);
 		return -4;
 	}
 
 	ssize_t ret = sendto(out, msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len, 0,
 		(struct sockaddr *)dstaddr, (out_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6));
 	if (unlikely(ret <= 0)) {
-		sd_journal_print(LOG_ERR, "Error sending to destination. (#%d %s)\n", errno, strerror(errno));
-		close(out);
+		(void) sd_journal_print(LOG_ERR, "Error sending to destination. (#%d %s)\n", errno, strerror(errno));
+		(void) close(out);
 		return -5;
 	}
 	++sent_counter; /* Not thread-safe, but this is a single-threaded program. */
 
-	close(out);
+	(void) close(out);
 	return 0;
 }
 
@@ -141,7 +141,7 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 		return -errno;
 	}
 	if (unlikely(expected_octets > max_accepted_payload_octets)) {
-		sd_journal_print(LOG_WARNING, "Dropped: Payload size exceeds maximum: %zd\n", expected_octets);
+		(void) sd_journal_print(LOG_WARNING, "Dropped: Payload size exceeds maximum: %zd\n", expected_octets);
 		/* We still need to call recvmsg, but with an empty buffer to get the message discarded. */
 		expected_octets = 0;
 	}
@@ -177,11 +177,11 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 		if (likely(errno == EAGAIN)) {
 			return 0;
 		}
-		sd_journal_print(LOG_WARNING, "Error calling recvmsg(). err (#%d %s)\n", errno, strerror(errno));
+		(void) sd_journal_print(LOG_WARNING, "Error calling recvmsg(). err (#%d %s)\n", errno, strerror(errno));
 		return 0; /* 0 because this function can be called again for new packets */
 	}
 	if (unlikely(msg.msg_flags & (MSG_CTRUNC|MSG_TRUNC))) {
-		sd_journal_print(LOG_WARNING, "Will forward a truncated datagram. Increase the recv buffers a bit to avoid this?\n");
+		(void) sd_journal_print(LOG_WARNING, "Will forward a truncated datagram. Increase the recv buffers a bit to avoid this?\n");
 	}
 	msg.msg_iov[0].iov_len = read_octets; /* don't send the whole buffer */
 
@@ -204,8 +204,7 @@ static int set_nonblocking(int fd) {
 	if ((opt | O_NONBLOCK) == opt) {
 		return 0;
 	}
-	int rc = fcntl(fd, F_SETFL, opt | O_NONBLOCK);
-	return rc;
+	return fcntl(fd, F_SETFL, opt | O_NONBLOCK);
 }
 
 /* hostnametoaddr translates a string |*hostname| to an address |*dstaddr|, preferably in
@@ -227,10 +226,10 @@ static int hostnametoaddr(sockaddr_union *dstaddr, const char *hostname, int pre
 	dstaddr->sa.sa_family = hostinfo->h_addrtype;
 
 	if (hostinfo->h_addrtype == AF_INET6) {
-		memcpy(&(dstaddr->in6.sin6_addr.s6_addr), hostinfo->h_addr,
+		(void) memcpy(&(dstaddr->in6.sin6_addr.s6_addr), hostinfo->h_addr,
 			sizeof(dstaddr->in6.sin6_addr.s6_addr));
 	} else {
-		memcpy(&(dstaddr->in.sin_addr.s_addr), hostinfo->h_addr,
+		(void) memcpy(&(dstaddr->in.sin_addr.s_addr), hostinfo->h_addr,
 			sizeof(dstaddr->in.sin_addr.s_addr));
 	}
 
@@ -261,7 +260,7 @@ static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, c
 		node = strndupa(arg_remote_host, port_str - arg_remote_host);
 		uint16_t portno = 0;
 		if (safe_atou16(++port_str, &portno) < 0) {
-			sd_journal_print(LOG_CRIT, "Failed to parse port number into 16b integer: %s", port_str);
+			(void) sd_journal_print(LOG_CRIT, "Failed to parse port number into 16b integer: %s", port_str);
 			return -72;
 		}
 		port = htons(portno);
@@ -303,7 +302,7 @@ static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
 
 	sent_counter = received_counter = 0;
 
-	sd_event_source_set_time(es, now + stats_every_usec); /* reschedules */
+	(void) sd_event_source_set_time(es, now + stats_every_usec); /* reschedules */
 	return 0;
 }
 
@@ -317,7 +316,7 @@ static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
 int main(int argc, char *argv[]) {
 	int n_systemd_sockets = sd_listen_fds(0);
 	if ((n_systemd_sockets + 1) != argc) {
-		sd_journal_print(LOG_ERR, "Mismatch in received sockets %d != %d destinations.", n_systemd_sockets, (argc - 1));
+		(void) sd_journal_print(LOG_ERR, "Mismatch in received sockets %d != %d destinations.", n_systemd_sockets, (argc - 1));
 		return EXIT_FAILURE;
 	}
 
@@ -327,7 +326,7 @@ int main(int argc, char *argv[]) {
 	sd_event *event = NULL;
 
 	if (unlikely(sd_event_default(&event) < 0)) {
-		sd_journal_print(LOG_DEBUG, "Cannot instantiate the event loop.");
+		(void) sd_journal_print(LOG_DEBUG, "Cannot instantiate the event loop.");
 		exit_code = 72;
 		goto finish;
 	}
@@ -349,7 +348,7 @@ int main(int argc, char *argv[]) {
 
 	/* Pull the watchdog, if requested. */
 	if (sd_event_set_watchdog(event, true) < 0) {
-		sd_journal_print(LOG_DEBUG, "Cannot pull the watchdog.");
+		(void) sd_journal_print(LOG_DEBUG, "Cannot pull the watchdog.");
 		exit_code = 74;
 		goto finish;
 	}
@@ -360,18 +359,18 @@ int main(int argc, char *argv[]) {
 
 		int r = sd_is_socket(fd, AF_UNSPEC, SOCK_DGRAM, -1);
 		if (r < 0) {
-			sd_journal_print(LOG_ERR, "Failed to determine socket type.");
+			(void) sd_journal_print(LOG_ERR, "Failed to determine socket type.");
 			exit_code = 4;
 			goto finish;
 		} else if (r == 0) {
-			sd_journal_print(LOG_ERR, "Passed in socket is not a datagram socket.");
+			(void) sd_journal_print(LOG_ERR, "Passed in socket is not a datagram socket.");
 			exit_code = 5;
 			goto finish;
 		}
 
 		/* set to non-blocking */
 		if (set_nonblocking(fd) < 0) {
-			sd_journal_print(LOG_CRIT, "Cannot set the socket to nonblocking: %d", i);
+			(void) sd_journal_print(LOG_CRIT, "Cannot set the socket to nonblocking: %d", i);
 			exit_code = 10;
 			goto finish;
 		}
@@ -383,17 +382,21 @@ int main(int argc, char *argv[]) {
 		sockaddr_union addr;
 		memset(&addr, 0, sizeof(addr));
 		socklen_t len = sizeof(addr);
-		getsockname(fd, (struct sockaddr *) &addr, &len);
+		if (getsockname(fd, (struct sockaddr *) &addr, &len) < 0) {
+			(void) sd_journal_perror("Failed to identify provided socket as source address.");
+			exit_code = 5;
+			goto finish;
+		}
 
 		if (fill_dstaddr(dstaddr, addr, argv[i+1]) < 0) {
-			sd_journal_print(LOG_ERR, "Cannot get the destination for socket: %d", i);
+			(void) sd_journal_print(LOG_ERR, "Cannot get the destination for socket: %d", i);
 			exit_code = 6;
 			goto finish;
 		}
 
 		/* register */
 		if (sd_event_add_io(event, &event_source, fd, EPOLLIN, udp_receive, dstaddr) < 0) {
-			sd_journal_print(LOG_CRIT, "event_add_io failed for socket no: %d", i);
+			(void) sd_journal_print(LOG_CRIT, "event_add_io failed for socket no: %d", i);
 			exit_code = 72;
 			goto finish;
 		}
@@ -413,37 +416,37 @@ int main(int argc, char *argv[]) {
 	/* Display some stats every now and then. */
 	{
 		uint64_t now;
-		sd_event_now(event, CLOCK_MONOTONIC, &now);
-		sd_event_add_time(event, &timer_source,
+		(void) sd_event_now(event, CLOCK_MONOTONIC, &now);
+		(void) sd_event_add_time(event, &timer_source,
 			CLOCK_MONOTONIC, now + stats_every_usec, 0,
 			display_stats, NULL);
 	}
-	sd_event_source_set_enabled(timer_source, SD_EVENT_ON);
+	(void) sd_event_source_set_enabled(timer_source, SD_EVENT_ON);
 
 	/* Block on main event-loop call. */
-	sd_journal_print(LOG_INFO, "Written by W. Mark Kubacki <wmark@hurrikane.de> https://github.com/wmark");
-	sd_journal_print(LOG_INFO, "Done setting everything up. Serving.");
+	(void) sd_journal_print(LOG_INFO, "Written by W. Mark Kubacki <wmark@hurrikane.de> https://github.com/wmark");
+	(void) sd_journal_print(LOG_INFO, "Done setting everything up. Serving.");
 	(void) sd_notify(false, "READY=1\n" "STATUS=Up and running.");
 	int r = sd_event_loop(event);
 	if (r < 0) {
-		sd_journal_print(LOG_ERR, "Failure: %s\n", strerror(-r));
+		(void) sd_journal_print(LOG_ERR, "Failure: %s\n", strerror(-r));
 		exit_code = -r;
 	}
 
 finish:
 	if (timer_source != NULL) {
-		sd_event_source_set_enabled(timer_source, SD_EVENT_OFF);
+		(void) sd_event_source_set_enabled(timer_source, SD_EVENT_OFF);
 		timer_source = sd_event_source_unref(timer_source);
 	}
 
-	sd_journal_print(LOG_DEBUG, "Freeing references to event-source and the event-loop.");
+	(void) sd_journal_print(LOG_DEBUG, "Freeing references to event-source and the event-loop.");
 	event_source = sd_event_source_unref(event_source);
 	event = sd_event_unref(event);
 
-	sd_journal_print(LOG_INFO, "Closing sockets before exiting.");
+	(void) sd_journal_print(LOG_INFO, "Closing sockets before exiting.");
 	for (int i = 0; i < argc; ++i) {
 		/* fdclean(SD_LISTEN_FDS_START + i); -- Not needed here. */
-		close(SD_LISTEN_FDS_START + i);
+		(void) close(SD_LISTEN_FDS_START + i);
 	}
 
 	if (payload_buffer != NULL) {
