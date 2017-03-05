@@ -83,7 +83,7 @@ static size_t received_counter = 0, sent_counter = 0;
  *
  * Negative return values indicate an error. A corresponding error message
  * will be passed to systemd's journal. */
-static int udp_forward(const struct msghdr *msg, const sockaddr_union *dstaddr) {
+static int __attribute__((nonnull)) udp_forward(const struct msghdr *msg, const sockaddr_union *dstaddr) {
 	auto in_family = ((struct sockaddr *)msg->msg_name)->sa_family;
 	auto out_family = dstaddr->sa.sa_family;
 
@@ -232,7 +232,7 @@ static int set_nonblocking(int fd) {
  * This really is an utility function for |fill_dstaddr|, which calls it.
  *
  * Negative return values indicate an error. */
-static int hostnametoaddr(sockaddr_union *dstaddr, const char *hostname, int preferred_sa_family) {
+static int __attribute__((nonnull (1,2))) hostnametoaddr(sockaddr_union *dstaddr, const char *hostname, int preferred_sa_family) {
 	struct hostent *hostinfo = gethostbyname2(hostname, preferred_sa_family);
 	if (hostinfo == NULL) {
 		hostinfo = gethostbyname(hostname);
@@ -264,7 +264,7 @@ static int hostnametoaddr(sockaddr_union *dstaddr, const char *hostname, int pre
  * to avoid costly address lookups.
  *
  * Negative return values indicate errors. */
-static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, const char *arg_remote_host) {
+static int __attribute__((nonnull (1,3))) fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, const char *arg_remote_host) {
 	const char *node, *port_str;
 	node = arg_remote_host;
 
