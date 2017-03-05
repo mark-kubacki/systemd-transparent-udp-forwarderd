@@ -28,6 +28,32 @@ typedef union {
 	struct sockaddr_in6 in6;
 } sockaddr_union;
 
+#if !defined(WHITESPACE)
+#define WHITESPACE      " \t\n\r"
+#endif
+
+/* Adapted from systemd. */
+static int __attribute__((nonnull)) safe_atou16(const char *s, uint16_t *ret) {
+	char *x = NULL;
+	unsigned long l;
+
+	s += strspn(s, WHITESPACE);
+
+	errno = 0;
+	l = strtoul(s, &x, 0);
+	if (errno > 0)
+		return -errno;
+	if (!x || x == s || *x)
+		return -EINVAL;
+	if (s[0] == '-')
+		return -ERANGE;
+	if ((unsigned long) (uint16_t) l != l)
+		return -ERANGE;
+
+	*ret = (uint16_t) l;
+	return 0;
+}
+
 /* These counters are reset in display_stats(). */
 static size_t received_counter = 0, sent_counter = 0;
 
@@ -223,20 +249,22 @@ static int hostnametoaddr(sockaddr_union *dstaddr, const char *hostname, int pre
  *
  * Negative return values indicate errors. */
 static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, const char *arg_remote_host) {
-	const char *node, *service;
+	const char *node, *port_str;
+	node = arg_remote_host;
 
 	auto port = srcaddr.in.sin_port;
 	if (srcaddr.sa.sa_family == AF_INET6) {
 		port = srcaddr.in6.sin6_port;
 	}
-	service = strrchr(arg_remote_host, ':');
-	if (service) { /* use the given port */
-		node = strndupa(arg_remote_host, service - arg_remote_host);
-		service++;
-		auto portno = atoi(service);
+	port_str = strrchr(arg_remote_host, ':');
+	if (port_str) { /* if a port is given: */
+		node = strndupa(arg_remote_host, port_str - arg_remote_host);
+		uint16_t portno = 0;
+		if (safe_atou16(++port_str, &portno) < 0) {
+			sd_journal_print(LOG_CRIT, "Failed to parse port number into 16b integer: %s", port_str);
+			return -72;
+		}
 		port = htons(portno);
-	} else { /* stick with the same port */
-		node = arg_remote_host;
 	}
 
 	if (hostnametoaddr(dstaddr, node, srcaddr.sa.sa_family) < 0) {
