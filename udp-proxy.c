@@ -21,6 +21,22 @@
 #define likely(x)       __builtin_expect(!!(x), 1)
 #define unlikely(x)     __builtin_expect(!!(x), 0)
 #endif
+#if !defined(__bounded__)
+#define __bounded__(a,b,c)
+#endif
+
+#if !defined(memzero)
+static inline void
+__attribute__((nonnull (1)))
+__attribute__((__bounded__(__buffer__,1,2)))
+memzero_f(void *buf, size_t len) {
+	memset(buf, '\0', len);
+}
+#define memzero(a, sz)  (memzero_f(a, sz))
+#endif
+#if !defined(zero)
+#define zero(x)         (memzero(&(x), sizeof(x)))
+#endif
 
 typedef union {
 	struct sockaddr sa;
@@ -151,9 +167,9 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	sockaddr_union sa;
 	char cntrlbuf[64];
 
-	memset(&msg, 0, sizeof(msg));
-	memset(&sa, 0, sizeof(sa));
-	memset(cntrlbuf, 0, sizeof(cntrlbuf));
+	zero(msg);
+	zero(sa);
+	memzero(cntrlbuf, sizeof(cntrlbuf));
 
 	iov[0].iov_base = payload_buffer; /* MT */
 	if (unlikely(expected_octets == 0)) {
@@ -377,10 +393,10 @@ int main(int argc, char *argv[]) {
 
 		/* get the destination */
 		sockaddr_union *dstaddr = alloca(sizeof(sockaddr_union));
-		memset(dstaddr, 0, sizeof(sockaddr_union));
+		memzero(dstaddr, sizeof(sockaddr_union));
 
 		sockaddr_union addr;
-		memset(&addr, 0, sizeof(addr));
+		zero(addr);
 		socklen_t len = sizeof(addr);
 		if (getsockname(fd, (struct sockaddr *) &addr, &len) < 0) {
 			(void) sd_journal_perror("Failed to identify provided socket as source address.");
@@ -410,7 +426,7 @@ int main(int argc, char *argv[]) {
 			exit_code = 71; /* save to assume it's a sys error if we don't have a few kb for malloc */
 			goto finish;
 		}
-		memset(payload_buffer, 0, buffer_size);
+		memzero(payload_buffer, buffer_size);
 	}
 
 	/* Display some stats every now and then. */
