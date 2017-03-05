@@ -1,4 +1,5 @@
 #include <alloca.h>
+#include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -267,7 +268,7 @@ static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, c
 	const char *node, *port_str;
 	node = arg_remote_host;
 
-	auto port = srcaddr.in.sin_port;
+	uint16_t port = srcaddr.in.sin_port;
 	if (srcaddr.sa.sa_family == AF_INET6) {
 		port = srcaddr.in6.sin6_port;
 	}
@@ -279,7 +280,7 @@ static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, c
 			(void) sd_journal_print(LOG_CRIT, "Failed to parse port number into 16b integer: %s", port_str);
 			return -72;
 		}
-		port = htons(portno);
+		port = htobe16(portno);
 	}
 
 	if (hostnametoaddr(dstaddr, node, srcaddr.sa.sa_family) < 0) {
