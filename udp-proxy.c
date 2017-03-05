@@ -66,7 +66,7 @@ static size_t received_counter = 0, sent_counter = 0;
  *
  * Negative return values indicate an error. A corresponding error message
  * will be passed to systemd's journal. */
-static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
+static int udp_forward(const struct msghdr *msg, const sockaddr_union *dstaddr) {
 	auto in_family = ((struct sockaddr *)msg->msg_name)->sa_family;
 	auto out_family = dstaddr->sa.sa_family;
 
@@ -436,7 +436,7 @@ finish:
 		timer_source = sd_event_source_unref(timer_source);
 	}
 
-	sd_journal_print(LOG_DEBUG, "Freeing reverences to event-source and the event-loop.");
+	sd_journal_print(LOG_DEBUG, "Freeing references to event-source and the event-loop.");
 	event_source = sd_event_source_unref(event_source);
 	event = sd_event_unref(event);
 
