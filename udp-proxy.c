@@ -28,7 +28,7 @@ typedef union {
 	struct sockaddr_in6 in6;
 } sockaddr_union;
 
-// These counters are reset in display_stats().
+/* These counters are reset in display_stats(). */
 static size_t received_counter = 0, sent_counter = 0;
 
 /* udp_forward sends the datagram from |*msg| to address |*dstaddr|.
@@ -57,7 +57,7 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 		return -3;
 	}
 
-	// IPv4 in IPv6 specialties
+	/* IPv4 in IPv6 specialties */
 	if (out_family == AF_INET6 && out_family != in_family) {
 		int m = 0;
 		if (setsockopt(out, IPPROTO_IPV6, IPV6_V6ONLY, &m, sizeof(int)) != 0) {
@@ -67,7 +67,7 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 		}
 	}
 
-	// spoof the sender
+	/* spoof the sender */
 	if (unlikely(bind(out, (struct sockaddr *)msg->msg_name, (in_family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)) {
 		sd_journal_print(LOG_ERR, "Error binding to destination. (#%d %s)\n", errno, strerror(errno));
 		close(out);
@@ -81,20 +81,20 @@ static int udp_forward(struct msghdr *msg, sockaddr_union *dstaddr) {
 		close(out);
 		return -5;
 	}
-	++sent_counter; // Not thread-safe, but this is a single-threaded program.
+	++sent_counter; /* Not thread-safe, but this is a single-threaded program. */
 
 	close(out);
 	return 0;
 }
 
 /* udp_receive() will refuse payloads greater than this.
-   16k is greater than most common jumbo frames can accomdate (4098 to 9204 octets),
-   but smaller than multi-fragment datagrams (aout 65k) which are extremely uncommon in practice.
-   Please keep in mind that IPv6 allows you to stitch together packets to send a single big UDP payload (about 4G!). */
+ * 16k is greater than most common jumbo frames can accomdate (4098 to 9204 octets),
+ * but smaller than multi-fragment datagrams (aout 65k) which are extremely uncommon in practice.
+ * Please keep in mind that IPv6 allows you to stitch together packets to send a single big UDP payload (about 4G!). */
 static const ssize_t max_accepted_payload_octets = 16 * 1024;
 
 /* Used and to be cleared in udp_receive(), at least the size of max_accepted_payload_octets.
-   Allocated in main(). */
+ * Allocated in main(). */
 static void *payload_buffer;
 
 /* udp_receive is called by the event loop and reads incoming datagrams from the supplied |fd|.
@@ -108,15 +108,15 @@ static void *payload_buffer;
  * Negative return values indicate an fatal error. A corresponding error message will be sent to
  * systemd's journal. */
 static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
-	++received_counter; // Not thread-safe, but this is a single-threaded program.
+	++received_counter; /* Not thread-safe, but this is a single-threaded program. */
 
 	ssize_t expected_octets = 0;
-	if (unlikely(ioctl(fd, FIONREAD, &expected_octets) < 0)) { // usually far less than 64k, more like 1.4k
+	if (unlikely(ioctl(fd, FIONREAD, &expected_octets) < 0)) { /* usually far less than 64k, more like 1.4k */
 		return -errno;
 	}
 	if (unlikely(expected_octets > max_accepted_payload_octets)) {
 		sd_journal_print(LOG_WARNING, "Dropped: Payload size exceeds maximum: %zd\n", expected_octets);
-		// We still need to call recvmsg, but with an empty buffer to get the message discarded.
+		/* We still need to call recvmsg, but with an empty buffer to get the message discarded. */
 		expected_octets = 0;
 	}
 
@@ -129,11 +129,11 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 	memset(&sa, 0, sizeof(sa));
 	memset(cntrlbuf, 0, sizeof(cntrlbuf));
 
-	iov[0].iov_base = payload_buffer; // MT
+	iov[0].iov_base = payload_buffer; /* MT */
 	if (unlikely(expected_octets == 0)) {
 		iov[0].iov_len = 0;
 	} else {
-		iov[0].iov_len = max_accepted_payload_octets; // payload_buffer is at least that size
+		iov[0].iov_len = max_accepted_payload_octets; /* payload_buffer is at least that size */
 	}
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 1;
@@ -144,7 +144,7 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 
 	/* receive */
 	ssize_t read_octets = recvmsg(fd, &msg, 0);
-	if (unlikely(read_octets == 0)) { // no payload, or we want to drop it anyway
+	if (unlikely(read_octets == 0)) { /* no payload, or we want to drop it anyway */
 		return 0;
 	}
 	if (unlikely(read_octets < 0)) {
@@ -152,12 +152,12 @@ static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *user
 			return 0;
 		}
 		sd_journal_print(LOG_WARNING, "Error calling recvmsg(). err (#%d %s)\n", errno, strerror(errno));
-		return 0; // 0 because this function can be called again for new packets
+		return 0; /* 0 because this function can be called again for new packets */
 	}
 	if (unlikely(msg.msg_flags & (MSG_CTRUNC|MSG_TRUNC))) {
 		sd_journal_print(LOG_WARNING, "Will forward a truncated datagram. Increase the recv buffers a bit to avoid this?\n");
 	}
-	msg.msg_iov[0].iov_len = read_octets; // don't send the whole buffer
+	msg.msg_iov[0].iov_len = read_octets; /* don't send the whole buffer */
 
 	/* forward */
 	sockaddr_union *dstaddr = userdata;
@@ -230,12 +230,12 @@ static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, c
 		port = srcaddr.in6.sin6_port;
 	}
 	service = strrchr(arg_remote_host, ':');
-	if (service) { // use the given port
+	if (service) { /* use the given port */
 		node = strndupa(arg_remote_host, service - arg_remote_host);
 		service++;
 		auto portno = atoi(service);
 		port = htons(portno);
-	} else { // stick with the same port
+	} else { /* stick with the same port */
 		node = arg_remote_host;
 	}
 
@@ -252,7 +252,7 @@ static int fill_dstaddr(sockaddr_union *dstaddr, const sockaddr_union srcaddr, c
 	return 0;
 }
 
-// How often should we update PID 1 about our workload?
+/* How often should we update PID 1 about our workload? */
 static const uint64_t stats_every_usec = 10 * 1000000;
 
 /* display_stats is a timer which updates PID 1 about the status of this process.
@@ -262,7 +262,7 @@ static const uint64_t stats_every_usec = 10 * 1000000;
  *
  * display_stats is expected to be called by the event loop. */
 static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
-	if (likely(sent_counter == received_counter)) { // okay because this is a single-threaded program.
+	if (likely(sent_counter == received_counter)) { /* okay because this is a single-threaded program. */
 		(void) sd_notifyf(false, "STATUS=%zu datagrams forwarded in the last %d seconds.",
 			sent_counter, (unsigned int)(stats_every_usec / 1000000));
 	} else if (sent_counter < received_counter) {
@@ -275,7 +275,7 @@ static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
 
 	sent_counter = received_counter = 0;
 
-	sd_event_source_set_time(es, now + stats_every_usec); // reschedules
+	sd_event_source_set_time(es, now + stats_every_usec); /* reschedules */
 	return 0;
 }
 
@@ -290,10 +290,10 @@ int main(int argc, char *argv[]) {
 	int n_systemd_sockets = sd_listen_fds(0);
 	if ((n_systemd_sockets + 1) != argc) {
 		sd_journal_print(LOG_ERR, "Mismatch in received sockets %d != %d destinations.", n_systemd_sockets, (argc - 1));
-		return 1;
+		return EXIT_FAILURE;
 	}
 
-	int exit_code = 0;
+	int exit_code = EXIT_SUCCESS;
 	sd_event_source *event_source = NULL;
 	sd_event_source *timer_source = NULL;
 	sd_event *event = NULL;
@@ -341,14 +341,14 @@ int main(int argc, char *argv[]) {
 			goto finish;
 		}
 
-		// set to non-blocking
+		/* set to non-blocking */
 		if (set_nonblocking(fd) < 0) {
 			sd_journal_print(LOG_CRIT, "Cannot set the socket to nonblocking: %d", i);
 			exit_code = 10;
 			goto finish;
 		}
 
-		// get the destination
+		/* get the destination */
 		sockaddr_union *dstaddr = alloca(sizeof(sockaddr_union));
 		memset(dstaddr, 0, sizeof(sockaddr_union));
 
@@ -363,7 +363,7 @@ int main(int argc, char *argv[]) {
 			goto finish;
 		}
 
-		// register
+		/* register */
 		if (sd_event_add_io(event, &event_source, fd, EPOLLIN, udp_receive, dstaddr) < 0) {
 			sd_journal_print(LOG_CRIT, "event_add_io failed for socket no: %d", i);
 			exit_code = 72;
@@ -373,10 +373,10 @@ int main(int argc, char *argv[]) {
 
 	/* Allocate the payload buffer. */
 	{
-		size_t buffer_size = ((size_t)(max_accepted_payload_octets - 1)/4096 + 1) * 4096; // multiple of 4k, the assumed page size
+		size_t buffer_size = ((size_t)(max_accepted_payload_octets - 1)/4096 + 1) * 4096; /* multiple of 4k, the assumed page size */
 		payload_buffer = malloc(buffer_size);
 		if (unlikely(payload_buffer == NULL)) {
-			exit_code = 71; // save to assume it's a sys error if we don't have a few kb for malloc
+			exit_code = 71; /* save to assume it's a sys error if we don't have a few kb for malloc */
 			goto finish;
 		}
 		memset(payload_buffer, 0, buffer_size);
@@ -414,12 +414,12 @@ finish:
 
 	sd_journal_print(LOG_INFO, "Closing sockets before exiting.");
 	for (int i = 0; i < argc; ++i) {
-		// fdclean(SD_LISTEN_FDS_START + i); -- No needed here.
+		/* fdclean(SD_LISTEN_FDS_START + i); -- Not needed here. */
 		close(SD_LISTEN_FDS_START + i);
 	}
 
 	if (payload_buffer != NULL) {
-		free(payload_buffer); // makes static code analyzing tools happy
+		free(payload_buffer); /* makes static code analyzing tools happy */
 	}
 
 	return exit_code;
