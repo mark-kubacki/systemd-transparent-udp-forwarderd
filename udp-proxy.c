@@ -73,6 +73,7 @@ static int __attribute__((nonnull)) safe_atou16(const char *s, uint16_t *ret) {
 
 /* These counters are reset in display_stats(). */
 static size_t received_counter = 0, sent_counter = 0;
+static bool overflow = false;
 
 /* udp_forward sends the datagram from |*msg| to address |*dstaddr|.
  * Its source will be the original source found in |msg|.
@@ -124,7 +125,9 @@ static int __attribute__((nonnull)) udp_forward(const struct msghdr *msg, const 
 		(void) close(out);
 		return -5;
 	}
-	++sent_counter; /* Not thread-safe, but this is a single-threaded program. */
+	if (unlikely(__builtin_add_overflow(sent_counter, 1, &sent_counter))) { /* Not thread-safe, but this is a single-threaded program. */
+		overflow = true; /* redundand, because received_counter would've set this, but for symmetry */
+	}
 
 	(void) close(out);
 	return 0;
@@ -151,7 +154,9 @@ static void *payload_buffer;
  * Negative return values indicate an fatal error. A corresponding error message will be sent to
  * systemd's journal. */
 static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
-	++received_counter; /* Not thread-safe, but this is a single-threaded program. */
+	if (unlikely(__builtin_add_overflow(received_counter, 1, &received_counter))) { /* Not thread-safe, but this is a single-threaded program. */
+		overflow = true;
+	}
 
 	ssize_t expected_octets = 0;
 	if (unlikely(ioctl(fd, FIONREAD, &expected_octets) < 0)) { /* usually far less than 64k, more like 1.4k */
@@ -306,7 +311,10 @@ static const uint64_t stats_every_usec = 10 * 1000000;
  *
  * display_stats is expected to be called by the event loop. */
 static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
-	if (likely(sent_counter == received_counter)) { /* okay because this is a single-threaded program. */
+	if (unlikely(overflow)) {
+		(void) sd_notifyf(false, "STATUS=<counter overflow> forwarded in the last %d seconds.",
+			(unsigned int)(stats_every_usec / 1000000));
+	} else if (likely(sent_counter == received_counter)) { /* okay because this is a single-threaded program. */
 		(void) sd_notifyf(false, "STATUS=%zu datagrams forwarded in the last %d seconds.",
 			sent_counter, (unsigned int)(stats_every_usec / 1000000));
 	} else if (sent_counter < received_counter) {
@@ -318,6 +326,7 @@ static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
 	}
 
 	sent_counter = received_counter = 0;
+	overflow = false;
 
 	(void) sd_event_source_set_time(es, now + stats_every_usec); /* reschedules */
 	return 0;
