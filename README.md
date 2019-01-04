@@ -1,7 +1,5 @@
 # Transparent socket-activated UDP Proxy/Forwarder for systemd
 
-[![build status](https://hub.blitznote.com/mark/udp-proxy/badges/master/build.svg)](https://hub.blitznote.com/mark/udp-proxy/commits/master)
-
 Written as quick workaround to
 **systemd-socket-proxyd** as of systemd v231 not forwarding UDP datagrams.
 

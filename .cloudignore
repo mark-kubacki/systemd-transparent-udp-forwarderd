@@ -1,0 +1,4 @@
+.cloudignore
+.git
+.gitignore
+#!include:.gitignore

@@ -1,0 +1,20 @@
+tags: ['c', 'cmake', 'systemd']
+
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '--file=Dockerfile.buildenv', '--tag=local/buildenv', '.']
+- name: 'local/buildenv'
+  dir: 'build'
+  args: ['cmake -GNinja ..']
+- name: 'local/buildenv'
+  dir: 'build'
+  args: ['ninja']
+
+# Usually you'd test the artifact.
+#   I've skipped this here because GCCB won't display, on a failure, which step.
+#   This way it's most likely that it didn't compile.
+
+#artifacts:
+#  objects:
+#    location: 'gs://some-bucket/some-dir/'
+#    paths: ['build/systemd-*udp*d']
