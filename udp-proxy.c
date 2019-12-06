@@ -135,9 +135,13 @@ static int __attribute__((nonnull)) udp_forward(const struct msghdr *msg, const 
 
 /* udp_receive() will refuse payloads greater than this.
  * 16k is greater than most common jumbo frames can accomdate (4098 to 9204 octets),
- * but smaller than multi-fragment datagrams (aout 65k) which are extremely uncommon in practice.
- * Please keep in mind that IPv6 allows you to stitch together packets to send a single big UDP payload (about 4G!). */
-static const ssize_t max_accepted_payload_octets = 16 * 1024;
+ * but smaller than multi-fragment datagrams (about 65k) which are possible but extremely uncommon in practice.
+ *
+ * Please keep in mind that IPv6 allows you to stitch together packets to send a single big UDP payload (about 4G!).
+ * Those would not be spec-conform, but some stacks seem to allow it anyway.
+ * In that case, this program will just drop them.
+ */
+static const ssize_t max_accepted_payload_octets = 65536;
 
 /* Used and to be cleared in udp_receive(), at least the size of max_accepted_payload_octets.
  * Allocated in main(). */
