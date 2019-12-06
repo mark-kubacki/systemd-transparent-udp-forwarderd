@@ -2,13 +2,15 @@ tags: ['c', 'cmake', 'systemd']
 
 steps:
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '--file=Dockerfile.buildenv', '--tag=local/buildenv', '.']
-- name: 'local/buildenv'
+  args: ['build', '--file=Dockerfile.buildenv', '--tag=local/cloud-builders/cmake', '.']
+- name: 'local/cloud-builders/cmake'
   dir: 'build'
-  args: ['cmake -GNinja ..']
-- name: 'local/buildenv'
+  entrypoint: '/usr/bin/cmake'
+  args: ['-GNinja', '..']
+- name: 'local/cloud-builders/cmake'
   dir: 'build'
-  args: ['ninja']
+  entrypoint: '/usr/bin/ninja'
+  args: []
 
 # Usually you'd test the artifact.
 #   I've skipped this here because GCCB won't display, on a failure, which step.

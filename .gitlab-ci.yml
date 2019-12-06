@@ -1,14 +1,17 @@
 binary:
   stage: build
+  image:
+    name: 'ubuntu:18.04'
+    entrypoint: ['/bin/bash']
   before_script:
-    - gcc -v
-    - apt-get -q update && apt-get -y --no-install-recommends --allow-downgrades install libsystemd-dev
-    - dpkg --list | grep -F systemd
+    - apt-get -q update
+    - apt-get -y --no-install-recommends --allow-downgrades install gcc cmake ninja-build libc6-dev libsystemd-dev
   script:
     - mkdir build && cd build
     - cmake -GNinja .. && ninja
     - mv systemd-*udp*d ..
   artifacts:
+    name: 'udp-proxy'
+    expose_as: 'udp-proxy'
+    paths: ['systemd-*udp*d']
     expire_in: 6 months
-    paths:
-      - systemd-*udp*d

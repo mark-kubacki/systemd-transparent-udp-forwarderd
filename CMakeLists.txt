@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 2.8.8)
 
-project(UDPForwarderd)
-
-enable_language(C)
+project(UDPForwarderd C)
 
 set(CMAKE_CPP_FLAGS "${CMAKE_CPP_FLAGS} -Wall -Werror=implicit-function-declaration -Wsign-compare -Wmissing-field-initializers -Wno-implicit-int -Wp,-D_FORTIFY_SOURCE=2")
 set(CMAKE_C_FLAGS "${CMAKE_CPP_FLAGS} ${CMAKE_C_FLAGS} -Os -fpic -fpie -fstack-protector-strong")
