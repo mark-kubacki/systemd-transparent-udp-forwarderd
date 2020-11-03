@@ -1,10 +1,12 @@
-FROM marketplace.gcr.io/google/ubuntu1804
+FROM mirror.gcr.io/library/gcc
 
 SHELL ["/bin/bash", "-c"]
 
 RUN apt-get -q update \
- && apt-get -y --no-install-recommends --allow-downgrades install \
+ && apt-get -y --no-install-recommends --no-upgrade --fix-broken install \
       gcc cmake ninja-build \
       libc6-dev \
       libsystemd-dev \
  && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+ENTRYPOINT ["/usr/bin/cmake"]
