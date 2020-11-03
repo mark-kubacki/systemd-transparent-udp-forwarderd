@@ -26,6 +26,11 @@
 #define __bounded__(a,b,c)
 #endif
 
+#if defined(__GLIBC_PREREQ) && __GLIBC_PREREQ(2,25)
+#if !defined(memzero)
+#define memzero(a, sz)  (explicit_bzero(a, sz))
+#endif
+#else /* __GLIBC_PREREQ(2,25) */
 #if !defined(memzero)
 static inline void
 __attribute__((nonnull (1)))
@@ -34,7 +39,9 @@ memzero_f(void *buf, size_t len) {
 	memset(buf, '\0', len);
 }
 #define memzero(a, sz)  (memzero_f(a, sz))
-#endif
+#endif /* !defined(memzero) */
+#endif /* __GLIBC_PREREQ(2,25) */
+
 #if !defined(zero)
 #define zero(x)         (memzero(&(x), sizeof(x)))
 #endif
