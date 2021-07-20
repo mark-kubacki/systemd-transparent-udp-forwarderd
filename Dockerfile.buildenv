@@ -1,4 +1,4 @@
-FROM mirror.gcr.io/library/gcc
+FROM gcc
 
 SHELL ["/bin/bash", "-c"]
 
