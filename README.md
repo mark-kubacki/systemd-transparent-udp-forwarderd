@@ -3,6 +3,11 @@
 Written as quick workaround to
 **systemd-socket-proxyd** not forwarding UDP datagrams.
 
+* If you need more than one-way transparent forwarding, for example metrics, consider
+  [Google’s Quilkin](https://github.com/googleforgames/quilkin).
+* A nice tutorial for TCP (this project is for UDP) and socket-activation has
+  [RedHat (serverless services)](https://www.redhat.com/en/blog/painless-services-implementing-serverless-rootless-podman-and-systemd)
+
 ## Caveats
 
  * Does not convert between IPv4 and IPv6.  
