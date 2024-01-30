@@ -352,6 +352,10 @@ static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
  * on STDERR, or sent to systemd's journal. */
 int main(int argc, char *argv[]) {
 	int n_systemd_sockets = sd_listen_fds(0);
+	if (n_systemd_sockets == 0) {
+		(void) sd_journal_print(LOG_ERR, "No systemd sockets received");
+		return EXIT_FAILURE;
+	}
 	if ((n_systemd_sockets + 1) != argc) {
 		(void) sd_journal_print(LOG_ERR, "Mismatch in received sockets %d != %d destinations.", n_systemd_sockets, (argc - 1));
 		return EXIT_FAILURE;
