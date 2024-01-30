@@ -369,6 +369,12 @@ static int activity_timeout_handler(sd_event_source *es, uint64_t now, void *use
  * on STDERR, or sent to systemd's journal. */
 int main(int argc, char *argv[]) {
 	int n_systemd_sockets = sd_listen_fds(0);
+
+	if (n_systemd_sockets == 0) {
+		(void) sd_journal_print(LOG_ERR, "No systemd sockets received");
+		return EXIT_FAILURE;
+	}
+
 	if ((n_systemd_sockets + 2) < argc || (n_systemd_sockets + 1) > argc) {
 		(void) sd_journal_print(LOG_ERR, "Mismatch in received sockets %d != %d destinations.", n_systemd_sockets, (argc - 1));
 		return EXIT_FAILURE;
@@ -377,7 +383,7 @@ int main(int argc, char *argv[]) {
 	if ((n_systemd_sockets + 2) == argc) {
 		if (safe_atou16(argv[argc - 1], &activity_timeout) < 0) {
 			(void) sd_journal_print(LOG_CRIT, "Failed to parse activity delay before timeout: %s", argv[argc - 1]);
-			return 75;
+			return EXIT_FAILURE;
 		}
 		(void) sd_journal_print(LOG_INFO, "Activity delay before timeout: %d", activity_timeout);
 	}
