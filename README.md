@@ -73,13 +73,19 @@ That service in turn *binds to* another, and therefore makes *systemd* schedule 
 BindsTo=avorion-server.service
 After=avorion-server.service
 
+# stop the game server if this service is stopped
+PropagatesStopTo=avorion-server.service
+
 [Service]
 Type=notify
 ExecStart=/opt/sbin/systemd-transparent-udp-forwarderd \
   172.16.28.240:27000 \
   172.16.28.240:27003 \
   172.16.28.240:27020 \
-  172.16.28.240:27021
+  172.16.28.240:27021 \
+  1800
+# ^^^^ this parameter is optional and allows the service to shut down after
+#      1800 seconds of inactivity
 ```
 
 Avorion's *service file* looks like this (excerpt). The corresponding *container address* is the important part:

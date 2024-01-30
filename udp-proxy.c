@@ -81,6 +81,8 @@ static int __attribute__((nonnull)) safe_atou16(const char *s, uint16_t *ret) {
 /* These counters are reset in display_stats(). */
 static size_t received_counter = 0, sent_counter = 0;
 static bool overflow = false;
+static uint16_t activity_timeout = 0;
+static sd_event_source *activity_timeout_source = NULL;
 
 /* udp_forward sends the datagram from |*msg| to address |*dstaddr|.
  * Its source will be the original source found in |msg|.
@@ -165,6 +167,10 @@ static void *payload_buffer;
  * Negative return values indicate an fatal error. A corresponding error message will be sent to
  * systemd's journal. */
 static int udp_receive(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
+	if (activity_timeout > 0) {
+		(void) sd_event_source_set_time_relative(activity_timeout_source, (uint64_t)(activity_timeout) * 1000000); /* reschedules timeout */
+	}
+
 	if (unlikely(__builtin_add_overflow(received_counter, 1, &received_counter))) { /* Not thread-safe, but this is a single-threaded program. */
 		overflow = true;
 	}
@@ -343,6 +349,17 @@ static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
 	return 0;
 }
 
+/* activity_timeout_handler is a timer which exit the service if no activity is
+ * detected on the socket for some time.
+ *
+ * MT: This is not thread-safe, but this program is single-threaded.
+ *
+ * activity_timeout_handler is expected to be called by the event loop. */
+static int activity_timeout_handler(sd_event_source *es, uint64_t now, void *userdata) {
+	(void) sd_event_exit(sd_event_source_get_event(es), 0);
+	return 0;
+}
+
 /* main accepts any and all sockets handed over by PID 1, matches them with destinations from
  * |*argv[]|, and setups the event loop and its callbacks.
  *
@@ -352,9 +369,23 @@ static int display_stats(sd_event_source *es, uint64_t now, void *userdata) {
  * on STDERR, or sent to systemd's journal. */
 int main(int argc, char *argv[]) {
 	int n_systemd_sockets = sd_listen_fds(0);
-	if ((n_systemd_sockets + 1) != argc) {
+
+	if (n_systemd_sockets == 0) {
+		(void) sd_journal_print(LOG_ERR, "No systemd sockets received");
+		return EXIT_FAILURE;
+	}
+
+	if ((n_systemd_sockets + 2) < argc || (n_systemd_sockets + 1) > argc) {
 		(void) sd_journal_print(LOG_ERR, "Mismatch in received sockets %d != %d destinations.", n_systemd_sockets, (argc - 1));
 		return EXIT_FAILURE;
+	}
+
+	if ((n_systemd_sockets + 2) == argc) {
+		if (safe_atou16(argv[argc - 1], &activity_timeout) < 0) {
+			(void) sd_journal_print(LOG_CRIT, "Failed to parse activity delay before timeout: %s", argv[argc - 1]);
+			return EXIT_FAILURE;
+		}
+		(void) sd_journal_print(LOG_INFO, "Activity delay before timeout: %d", activity_timeout);
 	}
 
 	int exit_code = EXIT_SUCCESS;
@@ -460,6 +491,14 @@ int main(int argc, char *argv[]) {
 	}
 	(void) sd_event_source_set_enabled(timer_source, SD_EVENT_ON);
 
+	/* Set the timer for when there is no activity */
+	if (activity_timeout > 0) {
+		(void) sd_event_add_time_relative(event, &activity_timeout_source,
+			CLOCK_MONOTONIC, (uint64_t)(activity_timeout) * 1000000, 0,
+			activity_timeout_handler, NULL);
+		(void) sd_event_source_set_enabled(timer_source, SD_EVENT_ON);
+	}
+
 	/* Block on main event-loop call. */
 	(void) sd_journal_print(LOG_INFO, "Written by W. Mark Kubacki <wmark@hurrikane.de> https://github.com/wmark");
 	(void) sd_journal_print(LOG_INFO, "Done setting everything up. Serving.");
@@ -474,6 +513,11 @@ finish:
 	if (timer_source != NULL) {
 		(void) sd_event_source_set_enabled(timer_source, SD_EVENT_OFF);
 		timer_source = sd_event_source_unref(timer_source);
+	}
+
+	if (activity_timeout_source != NULL) {
+		(void) sd_event_source_set_enabled(activity_timeout_source, SD_EVENT_OFF);
+		activity_timeout_source = sd_event_source_unref(activity_timeout_source);
 	}
 
 	(void) sd_journal_print(LOG_DEBUG, "Freeing references to event-source and the event-loop.");
