@@ -1,7 +1,7 @@
 binary:
   stage: build
   image:
-    name: 'ubuntu:18.04'
+    name: 'ubuntu:22.04'
     entrypoint: ['/bin/bash']
   before_script:
     - apt-get -q update

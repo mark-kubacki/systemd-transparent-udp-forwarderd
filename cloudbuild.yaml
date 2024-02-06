@@ -2,7 +2,7 @@ tags: ['c', 'cmake', 'systemd']
 
 steps:
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '--file=Dockerfile.buildenv', '--tag=localhost/cloud-builders/cmake', '.']
+  args: ['build', '--file=.devcontainer/Dockerfile', '--tag=localhost/cloud-builders/cmake', '.']
 
 - name: 'localhost/cloud-builders/cmake'
   id: 'compile'
@@ -10,7 +10,7 @@ steps:
   dir: 'build'
   entrypoint: 'bash'
   args:
-  - -c
+  - -ce
   - |
     cmake -GNinja ..;
     ninja
